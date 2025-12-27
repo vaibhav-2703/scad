@@ -25,7 +25,7 @@ Convert DGPS/Total Station survey data to professional AutoCAD DXF drawings. Bui
 
 ```bash
 # Clone the repository
-git clone https://github.com/YOUR_USERNAME/survey-to-cad.git
+git clone https://github.com/vaibhav-2703/scad.git
 cd survey-to-cad
 
 # Create virtual environment
