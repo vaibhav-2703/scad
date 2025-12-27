@@ -51,6 +51,8 @@ def reset_state():
     st.session_state.batch_id = None
 
 def load_data(file_content, file_name):
+    """Load and parse survey data file."""
+    tmp_path = None
     try:
         suffix = '.' + file_name.split('.')[-1]
         with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
@@ -59,7 +61,6 @@ def load_data(file_content, file_name):
         
         parser = SurveyDataParser()
         df = parser.parse_file(tmp_path)
-        os.unlink(tmp_path)
         
         crs = detect_coordinate_system(df)
         if crs == 'EPSG:4326':
@@ -69,6 +70,13 @@ def load_data(file_content, file_name):
         return df, None
     except Exception as e:
         return None, str(e)
+    finally:
+        # Clean up temp file
+        if tmp_path and os.path.exists(tmp_path):
+            try:
+                os.unlink(tmp_path)
+            except:
+                pass
 
 def analyze_groups(df):
     if 'Point_ID' not in df.columns:
@@ -145,8 +153,9 @@ def process_boundary(uploaded_file, project_name, location, drawn_by, scale, she
             summary_data = [{'name': s['Group'], 'area_m2': s['Area (m²)'], 'valid': True} for s in stats]
             cad.add_area_summary_table(summary_data, extents)
             
-        output_dir = Path("output")
-        output_dir.mkdir(exist_ok=True)
+        # Use temp directory for cloud compatibility
+        output_dir = Path(tempfile.gettempdir()) / "survey_to_cad"
+        output_dir.mkdir(exist_ok=True, parents=True)
         filename = f"{Path(uploaded_file.name).stem}_BOUNDARY.dxf"
         output_path = output_dir / filename
         cad.save(str(output_path))
@@ -184,8 +193,9 @@ def process_contour(uploaded_file, major_interval, minor_interval, index_interva
         )
         stats = generator.generate(points, show_points=show_points, show_point_labels=show_point_labels)
         
-        output_dir = Path("output")
-        output_dir.mkdir(exist_ok=True)
+        # Use temp directory for cloud compatibility
+        output_dir = Path(tempfile.gettempdir()) / "survey_to_cad"
+        output_dir.mkdir(exist_ok=True, parents=True)
         filename = f"{Path(uploaded_file.name).stem}_CONTOUR.dxf"
         output_path = output_dir / filename
         generator.save(str(output_path))
@@ -219,8 +229,9 @@ def process_volume(uploaded_file, proposed_level, sheet_size, show_grid):
         calculator = VolumeCalculator(sheet_size=sheet_size)
         stats = calculator.generate(points, proposed_level=proposed_level, show_grid=show_grid)
         
-        output_dir = Path("output")
-        output_dir.mkdir(exist_ok=True)
+        # Use temp directory for cloud compatibility
+        output_dir = Path(tempfile.gettempdir()) / "survey_to_cad"
+        output_dir.mkdir(exist_ok=True, parents=True)
         filename = f"{Path(uploaded_file.name).stem}_VOLUME.dxf"
         output_path = output_dir / filename
         calculator.save(str(output_path))
@@ -261,8 +272,9 @@ def process_subdivision(uploaded_file, num_plots, plot_width, plot_depth, road_w
             road_pattern=road_pattern
         )
         
-        output_dir = Path("output")
-        output_dir.mkdir(exist_ok=True)
+        # Use temp directory for cloud compatibility
+        output_dir = Path(tempfile.gettempdir()) / "survey_to_cad"
+        output_dir.mkdir(exist_ok=True, parents=True)
         filename = f"{Path(uploaded_file.name).stem}_SUBDIVISION.dxf"
         output_path = output_dir / filename
         planner.save(str(output_path))
@@ -437,17 +449,25 @@ else:
                     st.caption(f"{r['num_plots']} plots • Avg: {r['avg_area']:.0f} m²")
             
             with col3:
-                with open(r['path'], "rb") as f:
-                    st.download_button("⬇️ DXF", f, r['filename'], "application/dxf", key=f"dl_{i}", use_container_width=True)
+                try:
+                    with open(r['path'], "rb") as f:
+                        file_bytes = f.read()
+                    st.download_button("⬇️ DXF", file_bytes, r['filename'], "application/dxf", key=f"dl_{i}", use_container_width=True)
+                except FileNotFoundError:
+                    st.error(f"File not found: {r['filename']}")
         
         if len(successful) > 1:
             st.divider()
-            zip_buffer = io.BytesIO()
-            with zipfile.ZipFile(zip_buffer, "w") as zf:
-                for r in successful:
-                    zf.write(r['path'], r['filename'])
-            st.download_button(f"📦 Download All ({len(successful)})", zip_buffer.getvalue(),
-                              f"batch_{st.session_state.batch_id}.zip", "application/zip", use_container_width=True)
+            try:
+                zip_buffer = io.BytesIO()
+                with zipfile.ZipFile(zip_buffer, "w") as zf:
+                    for r in successful:
+                        if os.path.exists(r['path']):
+                            zf.write(r['path'], r['filename'])
+                st.download_button(f"📦 Download All ({len(successful)})", zip_buffer.getvalue(),
+                                  f"batch_{st.session_state.batch_id}.zip", "application/zip", use_container_width=True)
+            except Exception as e:
+                st.error(f"Error creating zip file: {str(e)}")
 
     if failed:
         st.divider()
