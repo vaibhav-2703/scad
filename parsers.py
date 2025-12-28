@@ -305,14 +305,36 @@ class SurveyDataParser:
             if is_comma_separated:
                 parts = [p.strip() for p in sample_line.split(',') if p.strip()]
                 if len(parts) >= 5:
-                    # Check if 2nd column (index 1) is numeric
+                    # Smart format detection:
+                    # Format 1: Point_ID, Easting, Northing, Elevation, Description
+                    # Format 2: Point_ID, Description, Easting, Northing, Elevation
+                    # 
+                    # Strategy: Check if columns 1&2 OR columns 2&3 are both large coordinates
+                    # Typical UTM coordinates are > 100000 for Easting and > 1000000 for Northing
                     try:
-                        float(parts[1])
-                        # 2nd column is numeric -> Original format: Point_ID, Easting, Northing, Elevation, Description
-                        format_detected = 'standard'
-                    except ValueError:
-                        # 2nd column is text -> New format: Point_ID, Description, Easting, Northing, Elevation
-                        format_detected = 'description_second'
+                        col1 = float(parts[1])
+                        col2 = float(parts[2])
+                        col3 = float(parts[3]) if len(parts) > 3 else 0
+                        
+                        # If columns 2&3 are both large (Easting & Northing), format is description_second
+                        if col2 > 10000 and col3 > 10000:
+                            format_detected = 'description_second'
+                        # If columns 1&2 are both large (Easting & Northing), format is standard
+                        elif col1 > 10000 and col2 > 10000:
+                            format_detected = 'standard'
+                        # If column 2 is large but column 1 is small, likely description_second
+                        elif col2 > 10000 and col1 < 10000:
+                            format_detected = 'description_second'
+                        else:
+                            # Fallback: check if column 1 can be a coordinate
+                            format_detected = 'standard' if col1 > 10000 else 'description_second'
+                    except (ValueError, IndexError):
+                        # If column 2 is not numeric, it's description_second format
+                        try:
+                            float(parts[1])
+                            format_detected = 'standard'
+                        except ValueError:
+                            format_detected = 'description_second'
                 elif len(parts) >= 3:
                     format_detected = 'standard'
             else:
