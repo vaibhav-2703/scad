@@ -170,8 +170,9 @@ def process_boundary(uploaded_file, project_name, location, drawn_by, scale, she
 
 
 def process_contour(uploaded_file, major_interval, minor_interval, index_interval, 
-                    smoothing, sheet_size, show_points, show_point_labels):
-    """Generate contour map."""
+                    smoothing, sheet_size, show_points, show_point_labels, show_grid=True, 
+                    grid_spacing=10.0, style='contour'):
+    """Generate contour map or spot elevation grid."""
     try:
         df, err = load_data(uploaded_file.getvalue(), uploaded_file.name)
         if err:
@@ -184,14 +185,17 @@ def process_contour(uploaded_file, major_interval, minor_interval, index_interva
                    'y': float(row['Northing']), 'z': float(row['Elevation'])} 
                   for _, row in df.iterrows()]
         
-        if len(points) < 4:
-            return {'success': False, 'file': uploaded_file.name, 'error': "Need at least 4 points"}
+        min_points = 3 if style == 'spot_elevation' else 4
+        if len(points) < min_points:
+            return {'success': False, 'file': uploaded_file.name, 'error': f"Need at least {min_points} points"}
         
         generator = ContourGenerator(
             major_interval=major_interval, minor_interval=minor_interval,
-            index_interval=index_interval, smoothing=smoothing, sheet_size=sheet_size
+            index_interval=index_interval, smoothing=smoothing, sheet_size=sheet_size,
+            grid_spacing=grid_spacing
         )
-        stats = generator.generate(points, show_points=show_points, show_point_labels=show_point_labels)
+        stats = generator.generate(points, show_points=show_points, show_point_labels=show_point_labels, 
+                                   show_grid=show_grid, style=style)
         
         # Use temp directory for cloud compatibility
         output_dir = Path(tempfile.gettempdir()) / "survey_to_cad"
@@ -320,17 +324,41 @@ with st.sidebar:
         show_labels = st.toggle("Show Area Labels", value=True)
         
     elif mode == "📈 Contour Map":
-        st.subheader("Contour Intervals")
-        major_interval = st.number_input("Major (m)", min_value=0.1, max_value=10.0, value=1.0, step=0.1)
-        minor_interval = st.number_input("Minor (m)", min_value=0.1, max_value=5.0, value=0.5, step=0.1)
-        index_interval = st.number_input("Index (m)", min_value=1.0, max_value=20.0, value=5.0, step=1.0)
+        st.subheader("Map Style")
+        map_style = st.radio(
+            "Output Type",
+            ["📊 Spot Elevation Grid", "🗺️ Contour Lines"],
+            help="Spot Elevation = Grid + Points + Labels (like reference). Contour Lines = Traditional topographic contours."
+        )
+        
         st.divider()
-        st.subheader("Processing")
-        smoothing = st.slider("Smoothing", 0.0, 3.0, 1.0, 0.1)
+        st.subheader("Grid Settings")
+        grid_spacing = st.number_input("Grid Spacing (m)", min_value=5.0, max_value=50.0, value=10.0, step=5.0, 
+                                       help="Grid overlay spacing in meters")
         sheet_size = st.selectbox("Sheet Size", ["A1", "A2", "A3"], index=0, key="contour_sheet")
-        st.divider()
-        show_points = st.toggle("Show Survey Points", value=True)
-        show_point_labels = st.toggle("Show Point Labels", value=False)
+        
+        # Only show contour-specific settings for contour mode
+        if map_style == "🗺️ Contour Lines":
+            st.divider()
+            st.subheader("Contour Intervals")
+            major_interval = st.number_input("Major (m)", min_value=0.5, max_value=10.0, value=1.0, step=0.5)
+            minor_interval = st.number_input("Minor (m)", min_value=0.25, max_value=5.0, value=0.5, step=0.25)
+            index_interval = st.number_input("Index (m)", min_value=1.0, max_value=20.0, value=5.0, step=1.0)
+            smoothing = st.slider("Smoothing", 1.0, 5.0, 2.5, 0.5, help="Higher = smoother contours")
+            st.divider()
+            st.subheader("Display Options")
+            show_grid = st.toggle("Show Grid Overlay", value=True, key="contour_grid")
+            show_points = st.toggle("Show Survey Points", value=True)
+            show_point_labels = st.toggle("Show Elevation Labels", value=False)
+        else:
+            # Defaults for spot elevation mode (not used but need to be defined)
+            major_interval = 1.0
+            minor_interval = 0.5
+            index_interval = 5.0
+            smoothing = 2.5
+            show_grid = True
+            show_points = True
+            show_point_labels = True
         
     elif mode == "⛏️ Cut/Fill Volume":
         st.subheader("Proposed Level")
@@ -398,8 +426,11 @@ if not st.session_state.processed_results:
                     result = process_boundary(file, project_name, location, drawn_by, 
                                               scale, sheet_size, show_dims, show_labels)
                 elif mode == "📈 Contour Map":
+                    # Determine style based on selection
+                    style = 'spot_elevation' if map_style == "📊 Spot Elevation Grid" else 'contour'
                     result = process_contour(file, major_interval, minor_interval, index_interval,
-                                             smoothing, sheet_size, show_points, show_point_labels)
+                                             smoothing, sheet_size, show_points, show_point_labels, 
+                                             show_grid, grid_spacing, style)
                 elif mode == "⛏️ Cut/Fill Volume":
                     level = proposed_level if proposed_level != 0 else None
                     result = process_volume(file, level, sheet_size, show_grid)
